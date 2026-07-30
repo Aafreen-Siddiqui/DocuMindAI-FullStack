@@ -1,0 +1,22 @@
+# Python byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables (just in case you ever put secrets here)
+.env
+.env.*
+!.env.example
+
+# Virtual Environments (in case created locally)
+venv/
+.venv/
+env/
+
+# IDE / Editor folders
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
