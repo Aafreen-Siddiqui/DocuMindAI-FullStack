@@ -3,33 +3,52 @@ from urllib.parse import urlparse
 
 
 def is_valid_url(url):
-    parsed = urlparse(url)
+    parsed = urlparse(url.strip())
+
     return (
         parsed.scheme in ("http", "https")
         and "." in parsed.netloc
     )
 
+
 def show_sidebar():
     st.sidebar.title("📄 DocuMind AI")
 
-    uploaded_file = st.sidebar.file_uploader(
-        "Upload a document",
-        type=["pdf", "csv", "txt"]
+    source_type = st.sidebar.radio(
+        "Choose source type",
+        ["Upload document", "Website URL"],
+        key="source_type"
     )
 
-    st.sidebar.markdown("---")
-    st.sidebar.write("**OR**")
+    if source_type == "Upload document":
 
-    url = st.sidebar.text_input("Enter Website URL")
+        uploaded_file = st.sidebar.file_uploader(
+            "Upload a document",
+            type=["pdf", "csv", "txt"],
+            key="document_uploader"
+        )
 
-    if uploaded_file:
-        st.sidebar.success(f"Uploaded: {uploaded_file.name}")
+        if uploaded_file is not None:
+            st.sidebar.success(
+                f"Uploaded: {uploaded_file.name}"
+            )
+
         return uploaded_file
 
-    if url:
-        if is_valid_url(url):
-            return url
-        else:
-            st.sidebar.error("Please enter a valid URL.")
+    else:
 
-    return None
+        url = st.sidebar.text_input(
+            "Enter Website URL",
+            key="website_url"
+        )
+
+        if url:
+
+            if is_valid_url(url):
+                return url
+
+            st.sidebar.error(
+                "Please enter a valid URL."
+            )
+
+        return None

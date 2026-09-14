@@ -1,115 +1,311 @@
-import streamlit as st
-from components.sidebar import show_sidebar
-from utils.loader import load_document
-from utils.splitter import splitting_docs
-from utils.embeddings import embed_docs
-from utils.vectorStoreAndRetriever import storing_vector_and_retriever
-from utils.rag_chain import generate_response, prompts_and_chains
-from langchain_groq import ChatGroq
-from dotenv import load_dotenv
 import time
-from langchain_core.messages import HumanMessage, AIMessage
+import requests
+import streamlit as st
 
-load_dotenv()
+from components.sidebar import show_sidebar
 
-st.set_page_config(page_title="DocuMind AI")
 
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    temperature=0
+# -----------------------------------------
+# Configuration
+# -----------------------------------------
+
+API_URL = "http://127.0.0.1:8000"
+
+
+st.set_page_config(
+    page_title="DocuMind AI",
+    page_icon="📚",
+    layout="wide"
 )
 
-document = show_sidebar()
-if document is None:
-    current_source = None
-elif isinstance(document, str):
-    current_source = document
-else:
-    current_source = document.name
 
-# ---------------- Session State ----------------
+# -----------------------------------------
+# API functions
+# -----------------------------------------
+
+def upload_document_to_api(source):
+    """
+    Upload either a file or a website URL to FastAPI.
+    """
+
+    if isinstance(source, str):
+        # Web URL
+        response = requests.post(
+            f"{API_URL}/documents/upload",
+            data={
+                "source_url": source
+            },
+            timeout=60
+        )
+
+    else:
+        # Uploaded file
+        files = {
+            "file": (
+                source.name,
+                source.getvalue(),
+                source.type
+            )
+        }
+
+        response = requests.post(
+            f"{API_URL}/documents/upload",
+            files=files,
+            timeout=60
+        )
+
+    if response.status_code == 429:
+        raise Exception(
+            "Upload limit reached. Please try again later."
+        )
+
+    response.raise_for_status()
+
+    return response.json()
+
+
+def wait_for_ingestion(job_id):
+    """
+    Wait until FastAPI finishes document ingestion.
+    """
+
+    status_placeholder = st.empty()
+
+    while True:
+
+        response = requests.get(
+            f"{API_URL}/documents/status/{job_id}",
+            timeout=30
+        )
+
+        response.raise_for_status()
+
+        status_data = response.json()
+        status = status_data.get("status")
+
+        if status == "queued":
+
+            status_placeholder.info(
+                "Document is waiting for processing..."
+            )
+
+        elif status == "processing":
+
+            status_placeholder.info(
+                "Loading document and creating embeddings..."
+            )
+
+        elif status == "completed":
+
+            chunks = status_data.get("chunks", "unknown")
+
+            status_placeholder.success(
+                f"Document processed successfully. "
+                f"Chunks created: {chunks}"
+            )
+
+            return True
+
+        elif status == "failed":
+
+            error_message = status_data.get(
+                "error",
+                "Document processing failed."
+            )
+
+            status_placeholder.error(error_message)
+
+            return False
+
+        time.sleep(1)
+
+
+def ask_question_to_api(question, job_id):
+    """
+    Send a question to FastAPI.
+    """
+
+    payload = {
+        "question": question,
+        "job_id": job_id
+    }
+
+    response = requests.post(
+        f"{API_URL}/questions/ask",
+        json=payload,
+        timeout=120
+    )
+    if response.status_code == 429:
+        return {
+                "success": False,
+                "error_type": "rate_limit",
+                "message": "⏳ Question limit reached. Please try again after 60 seconds."
+            }
+
+    response.raise_for_status()
+
+    response_data = response.json()
+
+    return response_data.get(
+        "answer",
+        "No answer was returned by the API."
+    )
+
+
+# -----------------------------------------
+# Session state
+# -----------------------------------------
+
+if "job_id" not in st.session_state:
+    st.session_state.job_id = None
+
+if "current_source" not in st.session_state:
+    st.session_state.current_source = None
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-if "current_file" not in st.session_state:
-    st.session_state.current_file = None
-    
+
+# -----------------------------------------
+# Sidebar
+# -----------------------------------------
+
+source = show_sidebar()
 
 
-# ---------------- Build RAG only once per file ----------------
+# -----------------------------------------
+# Upload and ingestion
+# -----------------------------------------
 
-@st.cache_resource
-def build_chain(document):
-    start = time.time()
-    docs = load_document(document)
-    print("Loading:", time.time() - start)
-    start = time.time()
-    chunks = splitting_docs(docs)
-    print("Splitting:", time.time() - start)
-    start = time.time()
-    embeddings = embed_docs()
-    retriever = storing_vector_and_retriever(chunks, embeddings)
-    print("Embedding + FAISS:", time.time() - start)
-    
-    return prompts_and_chains(llm, retriever)
+if source is not None:
 
-
-# ---------------- Reset history on new upload ----------------
-
-if document:
-
-    if st.session_state.current_file != current_source:
-        st.session_state.current_file = current_source
-        st.session_state.chat_history = []
-
-        st.toast("Document uploaded successfully!", icon="📄")
-        try:
-
-            with st.spinner("Processing document..."):
-                chain = build_chain(document)
-            st.toast("Knowledge base is ready!", icon="🎉")
-        except Exception as e:
-            st.error(str(e))
-            st.stop()
+    if isinstance(source, str):
+        # URL source
+        source_identifier = source
 
     else:
+        # Uploaded file source
+        source_identifier = source.name
+
+    # Process only when a new source is selected
+    if st.session_state.current_source != source_identifier:
+
+        st.session_state.current_source = source_identifier
+        st.session_state.job_id = None
+        st.session_state.chat_history = []
+
         try:
-            chain = build_chain(document)
-        except Exception as e:
-            st.error(str(e))
+
+            with st.spinner("Sending source to FastAPI..."):
+
+                upload_response = upload_document_to_api(source)
+
+                job_id = upload_response.get("job_id")
+
+                if not job_id:
+                    st.error(
+                        "FastAPI did not return a job ID."
+                    )
+                    st.stop()
+
+                st.session_state.job_id = job_id
+
+            ingestion_completed = wait_for_ingestion(job_id)
+
+            if not ingestion_completed:
+                st.session_state.job_id = None
+                st.stop()
+
+        except requests.RequestException as error:
+
+            st.error(
+                f"Could not communicate with FastAPI: {error}"
+            )
+
+            st.session_state.job_id = None
+            st.stop()
+
+        except Exception as error:
+
+            st.error(
+                f"An unexpected error occurred: {error}"
+            )
+
+            st.session_state.job_id = None
             st.stop()
 
 
-query = st.chat_input("Ask anything about your documents...")
+# -----------------------------------------
+# Main interface
+# -----------------------------------------
 
-if not query:
-    st.title("DocuMind AI")
-    st.subheader("Intelligent Enterprise Knowledge Assistant")
+st.title("📚 DocuMind AI")
 
-    st.info("""
-👋 **Welcome to DocuMind AI!**
-
-Upload a document and start chatting with it.
-""")
+st.write(
+    "Upload a PDF, CSV, TXT document, or enter a website URL "
+    "from the sidebar."
+)
 
 
-if document and query:
+if st.session_state.job_id is None:
 
-    response = generate_response(
-        chain,
-        query,
-        st.session_state.chat_history
+    st.info(
+        "Please upload a document or enter a valid website URL "
+        "from the sidebar to begin."
     )
-    print("Response : ",response)
-    for message in st.session_state.chat_history:
-        if isinstance(message, HumanMessage):
-           
-            with st.chat_message("user"):
-                    st.write(message.content)
 
-        elif isinstance(message, AIMessage):
-            
-            with st.chat_message("assistant"):
-                st.write(message.content)
-                
+else:
+
+    st.success("Source is ready. You can now ask questions.")
+
+    # Display previous conversation
+    for message in st.session_state.chat_history:
+
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    user_question = st.chat_input(
+        "Ask a question about your document..."
+    )
+
+    if user_question:
+
+        # Display user's question
+        with st.chat_message("user"):
+            st.markdown(user_question)
+
+        # Save user's question locally for display
+        st.session_state.chat_history.append(
+            {
+                "role": "user",
+                "content": user_question
+            }
+        )
+
+        # Ask FastAPI
+        with st.chat_message("assistant"):
+
+            with st.spinner("Generating answer..."):
+
+                try:
+
+                    answer = ask_question_to_api(
+                        question=user_question,
+                        job_id=st.session_state.job_id
+                    )
+
+                    st.markdown(answer)
+
+                    # Save assistant's answer locally for display
+                    st.session_state.chat_history.append(
+                        {
+                            "role": "assistant",
+                            "content": answer
+                        }
+                    )
+
+                except requests.RequestException as error:
+
+                    st.error(
+                        f"Question request failed: {error}"
+                    )
