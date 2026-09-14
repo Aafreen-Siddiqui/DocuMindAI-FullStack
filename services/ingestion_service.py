@@ -60,6 +60,7 @@ def process_document_in_background(
 
             # Load webpage content directly from the URL
             loader = WebBaseLoader(source_url)
+            extension = "url"
 
         else:
 

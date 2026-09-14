@@ -4,6 +4,8 @@
 
 The application combines **Streamlit**, **FastAPI**, **LangChain**, **LLMs**, and **vector similarity search** to provide conversational answers based on the content of uploaded documents.
 
+
+
 ## Features
 
 * Upload and process PDF, CSV, and TXT files.
@@ -19,6 +21,10 @@ The application combines **Streamlit**, **FastAPI**, **LangChain**, **LLMs**, an
 * Provide REST API endpoints through FastAPI.
 * Apply basic API rate limiting.
 * Support deployment of the frontend and backend as separate services.
+
+## Important links
+* Mandatory emplanations document link - https://drive.google.com/file/d/1o1GG4e19qrtHmaCapsgEzaF5QFzw4p9z/view?usp=sharing
+* Architecture diagram link - https://drive.google.com/file/d/1MBaaoXqWZYcEQ1fXYQ93j0Sua-p1bsVa/view?usp=drive_link
 
 ## Technology Stack
 
@@ -342,6 +348,10 @@ After deployment, copy the backend URL and configure it in the Streamlit fronten
 * Add monitoring and logging.
 * Improve error handling and user feedback.
 * Support multiple users and separate document collections.
+
+
+
+
 
 ## Author
 
